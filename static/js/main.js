@@ -3,6 +3,29 @@
 $(function() {
   deadlineByConf = {};
 
+  var all_confs_data = [];
+  {% for conf in site.data.conferences %}
+  {% assign num_deadlines = conf.deadline.size %}
+  {% assign range_end = conf.deadline.size | minus: 1 %}
+  {% for i in (0..range_end) %}
+  {% assign conf_id = conf.name | append: conf.year | append: '-' | append: i | slugify %}
+  all_confs_data.push({
+    id: '{{ conf_id }}',
+    name: {{ conf.name | jsonify }},
+    description: {{ conf.description | strip_html | strip_newlines | jsonify }},
+    tags: {{ conf.tags | jsonify }},
+    year: '{{ conf.year }}',
+    place: {{ conf.place | jsonify }}
+  });
+  {% endfor %}
+  {% endfor %}
+
+  var fuse = new Fuse(all_confs_data, {
+    keys: ['name', 'description', 'year', 'place'],
+    includeScore: true,
+    threshold: 0.4
+  });
+
   {% for conf in site.data.conferences %}
   // {{ conf.name }} {{ conf.year }}
   {% if conf.deadline[0] == "TBA" %}
@@ -95,63 +118,94 @@ $(function() {
   $('.conf-container').append(confs);
 
   // Set checkboxes
-  var conf_type_data = {{ site.data.types | jsonify }};
+  // Read filter data from Jekyll
+  var filter1 = {{ site.data.filters.filter1 | jsonify }};
+  var filter2 = {{ site.data.filters.filter2 | jsonify }};
+  var filter3 = {{ site.data.filters.filter3 | jsonify }};
+
+  // Combine all filters into a single array
   var all_tags = [];
   var toggle_status = {};
-  for (var i = 0; i < conf_type_data.length; i++) {
-    all_tags[i] = conf_type_data[i]['tag'];
-    toggle_status[all_tags[i]] = false;
+
+  function processFilters(filters) {
+    for (var i = 0; i < filters.length; i++) {
+      all_tags.push(filters[i]['tag']);
+      toggle_status[filters[i]['tag']] = false;
+    }
   }
+
+  processFilters(filter1);
+  processFilters(filter2);
+  processFilters(filter3);
+
+  // Retrieve stored preferences
   var tags = store.get('{{ site.domain }}');
   if (tags === undefined) {
-    tags = all_tags;
+    tags = []; // Default to all unchecked
   }
-  for (var i = 0; i < tags.length; i++) {
-    $('#' + tags[i] + '-checkbox').prop('checked', false);
-    toggle_status[tags[i]] = false;
+
+  // Apply stored preferences to checkboxes
+  for (var i = 0; i < all_tags.length; i++) {
+      var tag = all_tags[i];
+      var isChecked = tags.includes(tag); // Check if the tag is stored
+      $('#' + tag + '-checkbox').prop('checked', isChecked);
+      toggle_status[tag] = isChecked;
   }
+
+  // Save updated selection to local storage
   store.set('{{ site.domain }}', tags);
 
-  function update_conf_list() {
-    confs.each(function(i, conf) {
-      var conf = $(conf);
-      var show = false;
-      var set_tags = [];
-      for (var i = 0; i < all_tags.length; i++) {
-        // if tag has been selected by user, check if the conference has it
-        if(toggle_status[all_tags[i]]) {
-          set_tags.push(conf.hasClass(all_tags[i]));
+   
+   
+  // Track selected filters
+  let selectedFilters = {
+    filter1: new Set(),
+    filter2: new Set(),
+    filter3: new Set()
+  };
+
+  function updateConfList() {
+    $(".conf").each(function () {
+      let conf = $(this);
+      let show = true;
+
+      // Check each filter group
+      Object.keys(selectedFilters).forEach(filterGroup => {
+        if (selectedFilters[filterGroup].size > 0) {
+          let hasTag = false;
+          selectedFilters[filterGroup].forEach(tag => {
+            if (conf.hasClass(tag)) {
+              hasTag = true;
+            }
+          });
+          if (!hasTag) {
+            show = false;
+          }
         }
-      }
-      let empty_or_all_true = arr => arr.every(Boolean);
-      // show a conference if it has all user-selected tags
-      // if no tag is set (= array is empty), show all entries
-      show = empty_or_all_true(set_tags);
+      });
+
+      // Show or hide based on filter matching
       if (show) {
         conf.show();
       } else {
-        conf.hide()
+        conf.hide();
       }
     });
   }
-  update_conf_list();
 
-  // Event handler on checkbox change
-  $('form :checkbox').change(function(e) {
-    var checked = $(this).is(':checked');
-    var tag = $(this).prop('id').slice(0, -9);
-    toggle_status[tag] = checked;
+  // Handle checkbox changes
+  $(".filter-checkbox").change(function () {
+    let tag = $(this).attr("id").replace("-checkbox", "");
+    let filterGroup = $(this).data("filter-group");
 
-    if (checked == true) {
-      if (tags.indexOf(tag) < 0)
-        tags.push(tag);
+    if ($(this).is(":checked")) {
+      selectedFilters[filterGroup].add(tag);
+    } else {
+      selectedFilters[filterGroup].delete(tag);
     }
-    else {
-      var idx = tags.indexOf(tag);
-      if (idx >= 0)
-        tags.splice(idx, 1);
-    }
-    store.set('{{ site.domain }}', tags);
-    update_conf_list();
+
+    updateConfList();
   });
+
+  updateConfList(); // Initial display
 });
